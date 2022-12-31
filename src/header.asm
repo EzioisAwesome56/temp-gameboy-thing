@@ -3,6 +3,7 @@ SECTION "Work RAM", WRAM0
 wLCDDisabled: db
 wCanDoVblank: db
 wTileLoop: db
+wTileSlot: db
 
 SECTION "Stack", WRAM0
 StackBottom: ds 49
@@ -10,7 +11,7 @@ StackTop: ds 1
 
 DEF LCDC EQU $FF40
 DEF VRAM_TILE EQU $8000
-DEF INTERUPT_ENABLE = $FFFF
+DEF INTERUPT_ENABLE EQU $FFFF
 
 SECTION "VBlank interupt", ROM0[$0040]
 	jp Do_VBlank
@@ -76,7 +77,7 @@ Dank:
 	; enable the LCD
 	ld hl, LCDC
 	set 7, [hl]
-	; loop to waste time
+	; commit stop
 .dank
 	jr .dank
 
@@ -93,6 +94,8 @@ Do_VBlank:
 	; else, disable the LCD and PPU
 	ld hl, LCDC
 	res 7, [hl]
+	; clear tilemap
+	call clear_tilemap
 	; inform code that the LCD is turned off
 	; set a to 1
 	ld a, 1
@@ -108,6 +111,41 @@ Do_VBlank:
 	reti
 
 SECTION "Helpful routines", ROMX
+; clear tilemap
+clear_tilemap:
+	; backup values
+	push af
+	push bc
+	push hl
+	; load 9800 into hl
+	ld hl, $9800
+.loop
+	; test if l is FF
+	ld a, l
+	cp $FF
+	jr z, .check
+.resume
+	; if its not, write a zero into memory at hl
+	xor a
+	ld [hl], a
+	; inc hl
+	inc hl
+	; loop
+	jr .loop
+.check
+	; is h 9b?
+	ld a, h
+	cp $9B
+	; if yes, return
+	jr z, .exit
+	; else, go back to the loop
+	jr .resume
+.exit
+	pop hl
+	pop bc
+	pop af
+	ret
+
 ; load a single tile at HL into VRAM
 loadtile:
 	; backup various things
