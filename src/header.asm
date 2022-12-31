@@ -68,7 +68,14 @@ Dank:
 	; not set, keep waiting
 	jr nz, .waitloop
 	; if we are here, the LCD is DISABLED and we can now load some graphics into vram
+	xor a
+	ld [wTileSlot], a
 	ld hl, e_graphic
+	call loadtile
+	; load the a tile into slot 2 of vram
+	inc a
+	ld [wTileSlot], a
+	ld hl, a_graphic
 	call loadtile
 	; set the first tile in the tilemap to 0
 	ld hl, $9800
@@ -146,6 +153,42 @@ clear_tilemap:
 	pop af
 	ret
 
+gettileaddress:
+	; set bc to 16
+	xor a
+	ld b, a
+	ld a, 16
+	ld c, a
+	; reset the loop
+	xor a
+	ld [wTileLoop], a
+.loop
+	; backup hl
+	push hl
+	; load the tile slot into hl
+	ld hl, wTileSlot
+	; load the total loop count into a
+	ld a, [wTileLoop]
+	; are they equal?
+	cp [hl]
+	jr z, .exit
+	; if not, retore hl to what it was before
+	pop hl
+	; add bc to hl
+	add hl, bc
+	; load current loop count
+	ld a, [wTileLoop]
+	; increment
+	inc a
+	ld [wTileLoop], a
+	jr .loop
+.exit
+	; pop hl off the stack
+	pop hl
+	; return
+	ret
+
+
 ; load a single tile at HL into VRAM
 loadtile:
 	; backup various things
@@ -157,6 +200,11 @@ loadtile:
 	pop de
 	; load vram start to hl
 	ld hl, VRAM_TILE
+	; load the current slot index
+	ld a, [wTileSlot]
+	; is it not 0?
+	cp 0
+	call nz, gettileaddress
 	; set bc to 1
 	xor b
 	ld a, $1
@@ -202,3 +250,4 @@ loadtile:
 
 SECTION "Graphics", ROMX
 e_graphic: INCBIN "res/e.2bpp"
+a_graphic: INCBIN "res/a.2bpp"
