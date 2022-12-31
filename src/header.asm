@@ -1,3 +1,19 @@
+SECTION "Work RAM", WRAM0
+	; variables to help us keep track of shit
+wLCDDisabled: db
+wCanDoVblank: db
+wTileLoop: db
+
+SECTION "Stack", WRAM0
+StackBottom: ds 49
+StackTop: ds 1
+
+DEF LCDC EQU $FF40
+DEF VRAM_TILE EQU $8000
+DEF INTERUPT_ENABLE = $FFFF
+
+SECTION "VBlank interupt", ROM0[$0040]
+	jp Do_VBlank
 
 SECTION "Header", ROM0[$100]
 
@@ -18,4 +34,133 @@ SECTION "Entry point", ROM0
 
 EntryPoint:
 	; Here is where the fun begins, happy coding :)
-	jr @
+	jp Dank
+
+
+SECTION "Init code", ROMX
+Dank:
+	; reset the lcd disabled flag to 0
+	; set a to 0
+	xor a
+	ld [wLCDDisabled], a
+	; setup the stack pointer
+	ld sp, StackTop
+	; set the tile data area to $8000
+	ld hl, LCDC
+	set 4, [hl]
+	; set tilemap area for background to 9800-9BFF
+	res 3, [hl]
+	; load the interupt thing into hl
+	ld hl, INTERUPT_ENABLE
+	set 0, [hl]
+	; set a to one now
+	inc a
+	; tell vblank it can do the do
+	ld [wCanDoVblank], a
+	; enable interupts
+	ei
+	; wait for the LCD to be disabled
+.waitloop
+	; load our value into a
+	ld a, [wLCDDisabled]
+	cp 1
+	; not set, keep waiting
+	jr nz, .waitloop
+	; if we are here, the LCD is DISABLED and we can now load some graphics into vram
+	ld hl, e_graphic
+	call loadtile
+	; set the first tile in the tilemap to 0
+	ld hl, $9800
+	xor a
+	ld [hl], a
+	; enable the LCD
+	ld hl, LCDC
+	set 7, [hl]
+	; loop to waste time
+.dank
+	jr .dank
+
+
+SECTION "VBlank hanlder", ROMX 
+Do_VBlank:
+	push af
+	push hl
+	; check to see if we can disable the LCD
+	ld a, [wCanDoVblank]
+	cp 1
+	; if no, exit
+	jr nz, .end
+	; else, disable the LCD and PPU
+	ld hl, LCDC
+	res 7, [hl]
+	; inform code that the LCD is turned off
+	; set a to 1
+	ld a, 1
+	; load it to our value
+	ld [wLCDDisabled], a
+	; reset the flag that we can do vblank
+	xor a
+	ld [wCanDoVblank], a
+.end
+	; return from the interupt call
+	pop hl
+	pop af
+	reti
+
+SECTION "Helpful routines", ROMX
+; load a single tile at HL into VRAM
+loadtile:
+	; backup various things
+	push de
+	push bc
+	push af
+	; move HL to DE
+	push hl
+	pop de
+	; load vram start to hl
+	ld hl, VRAM_TILE
+	; set bc to 1
+	xor b
+	ld a, $1
+	ld c, a
+	; set our counter to 0
+	xor a
+	ld [wTileLoop], a
+.loop
+	; have we loaded all 16 bytes?
+	ld a, [wTileLoop]
+	cp 16
+	; if yes, end
+	jr z, .end
+	; otherwise, load tile into vram
+	ld a, [de]
+	ld [hl], a
+	; add one to hl
+	add hl, bc
+	; backup hl
+	push hl
+	; move de to hl
+	push de
+	pop hl
+	; add one to the DE value in hl
+	add hl, bc
+	; move everything back
+	push hl
+	pop de
+	pop hl
+	; inc our flag
+	ld a, [wTileLoop]
+	inc a
+	ld [wTileLoop], a
+	; jump to loop
+	jr .loop
+.end
+	; pop everything off the stack
+	pop af
+	pop bc
+	pop de
+	ret
+
+
+SECTION "Graphics", ROMX
+e_graphic: INCBIN "res/e.2bpp"

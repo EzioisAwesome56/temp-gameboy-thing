@@ -30,6 +30,7 @@ RGBDS   :=
 RGBASM  := $(RGBDS)rgbasm
 RGBLINK := $(RGBDS)rgblink
 RGBFIX  := $(RGBDS)rgbfix
+RGBGFX  := $(RGBDS)rgbgfx
 
 ROM = $(BINDIR)/$(ROMNAME).$(ROMEXT)
 
@@ -114,6 +115,11 @@ VPATH := src
 res/%.pb16: src/tools/pb16.py res/%
 	@$(MKDIR_P) $(@D)
 	$^ $@
+
+# convert pngs to 2bpp files
+res/%.2bpp: res/%.png
+	$(MKDIR_P) res
+	$(RGBGFX) $^ -o $@
 
 # Catch non-existent files
 # KEEP THIS LAST!!

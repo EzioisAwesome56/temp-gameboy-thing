@@ -63,4 +63,4 @@ ASFLAGS += -h
 # LDFLAGS += -w
 
 # 32k mode
-# LDFLAGS += -t
+ LDFLAGS += -t
