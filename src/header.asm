@@ -1,3 +1,5 @@
+DEF STRCOPY_BUF_SIZE EQU 12
+
 SECTION "Work RAM", WRAM0
 	; variables to help us keep track of shit
 wLCDDisabled: db
@@ -7,7 +9,7 @@ wTileSlot: db
 
 SECTION "Workram String copy buffer", wramx
 wVblankDoTransfer: db
-wVblankTransferBuffer: ds 7
+wVblankTransferBuffer: ds STRCOPY_BUF_SIZE
 wVBlankTransferDest: ds 2
 wVblanktransfercount: db
 
@@ -18,10 +20,14 @@ StackTop: ds 1
 DEF LCDC EQU $FF40
 DEF VRAM_TILE EQU $8000
 DEF INTERUPT_ENABLE EQU $FFFF
+
 ; charmap shit
+CHARMAP " ", 0
 CHARMAP "E", 1
 charmap "A", 2
 CHARMAP "B", 3
+CHARMAP "N", 4
+CHARMAP "S", 5
 CHARMAP "@", $FF
 
 SECTION "VBlank interupt", ROM0[$0040]
@@ -65,6 +71,8 @@ Dank:
 	; load the interupt thing into hl
 	ld hl, INTERUPT_ENABLE
 	set 0, [hl]
+	; clear buffer
+	call clear_buffer
 	; set a to one now
 	inc a
 	; tell vblank it can do the do
@@ -79,14 +87,13 @@ Dank:
 	; not set, keep waiting
 	jr nz, .waitloop
 	; if we are here, the LCD is DISABLED and we can now load some graphics into vram
-	call init_loadtiles
+	call init_loadcharset
 	; set the first tile in the tilemap to 0
 	ld hl, $9800
 	xor a
 	ld [hl], a
 	; enable the LCD
-	ld hl, LCDC
-	set 7, [hl]
+	call enable_lcd
 	; commit stop
 	ld hl, test
 	ld de, $9840
@@ -95,7 +102,7 @@ Dank:
 	jr .dank
 
 
-init_loadtiles:
+init_loadcharset:
 	xor a
 	inc a
 	ld [wTileSlot], a
@@ -111,11 +118,36 @@ init_loadtiles:
 	ld [wTileSlot], a
 	ld hl, b_graphic
 	call loadtile
+	; load n tile
+	inc a
+	ld [wTileSlot], a
+	ld hl, n_graphic
+	call loadtile
+	; load s tile
+	inc a
+	ld [wTileSlot], a
+	ld hl, s_graphic
+	call loadtile
 	; return
 	ret
 
 
 SECTION "VBlank hanlder", ROMX 
+; disables the LCd (bit 7 of the lcd controller)
+disable_lcd:
+	push hl
+	ld hl, LCDC
+	res 7, [hl]
+	pop hl
+	ret
+; enables the LCD
+enable_lcd:
+	push hl
+	ld hl, LCDC
+	set 7, [hl]
+	pop hl
+	ret
+
 Do_VBlank:
 	push af
 	push hl
@@ -125,8 +157,7 @@ Do_VBlank:
 	; if no, exit
 	jr nz, .end
 	; else, disable the LCD and PPU
-	ld hl, LCDC
-	res 7, [hl]
+	call disable_lcd
 	; does it want us to do a transfer?
 	ld a, [wVblankDoTransfer]
 	cp 1
@@ -169,14 +200,17 @@ VBlank_Transfer:
 .loop
 	; load the count into a
 	ld a, [wVblanktransfercount]
-	; is it 7?
-	cp 7
+	; is it the max buffer size?
+	cp STRCOPY_BUF_SIZE
 	jr z, .exit
-	; otherwise, inc the cound
+	; otherwise, inc the count
 	inc a
 	ld [wVblanktransfercount], a
 	; load de into a
 	ld a, [de]
+	; is it equal to @? if so, we are done here!
+	cp "@"
+	jr z, .exit
 	; store it into hl
 	ld [hl], a
 	; inc de
@@ -190,14 +224,45 @@ VBlank_Transfer:
 	xor a
 	ld [wVblankDoTransfer], a
 	ld [wCanDoVblank], a
-	; load the LDCD into hl
-	ld hl, LCDC
-	set 7, [hl]
+	; clear buffer
+	call clear_buffer
+	; reanable the lcd
+	call enable_lcd
 	pop bc
 	pop de
 	jp Do_VBlank.end
 
 SECTION "Helpful routines", ROMX
+; clears the vblank transfer buffer
+clear_buffer:
+	push de
+	push af
+	; load buffer address into de
+	ld de, wVblankTransferBuffer
+	; load 0 into a
+	xor a
+	; set our counter to 0
+	ld [wVblanktransfercount], a
+.loop
+	; load the current count value
+	ld a, [wVblanktransfercount]
+	; is it equal to the max buffer size? if so, exit
+	cp STRCOPY_BUF_SIZE
+	jr z, .exit
+	; otherwise, write 0 to de and inc some shit
+	xor a
+	ld [de], a
+	inc de
+	ld a, [wVblanktransfercount]
+	inc a
+	ld [wVblanktransfercount], a
+	jr .loop
+.exit
+	; restore de and return
+	pop af
+	pop de
+	ret 
+
 ; clear tilemap
 clear_tilemap:
 	; backup values
@@ -356,14 +421,15 @@ prepare_buffer:
 	ld a, 1
 	ld c, a
 .loop
-	; check to see if the current value at de is @
+	; load the current character at location de
 	ld a, [de]
-	cp "@"
-	; exit
-	jr z, .exit
 	; store the current char into hl
 	ld [hl], a
-	; add 16 to hl
+	; check to see if a is @
+	cp "@"
+	; if so, exit
+	jr z, .exit
+	; add 1 to hl
 	add hl, bc
 	; inc de
 	inc de
@@ -378,9 +444,11 @@ prepare_buffer:
 	ret
 
 SECTION "Misc Data shit", ROMX
-test: db "BAE@"
+test: db "BEANS BABE@"
 
 SECTION "Graphics", ROMX
 e_graphic: INCBIN "res/e.2bpp"
 a_graphic: INCBIN "res/a.2bpp"
 b_graphic: INCBIN "res/b.2bpp"
+n_graphic: INCBIN "res/n.2bpp"
+s_graphic: INCBIN "res/s.2bpp"
