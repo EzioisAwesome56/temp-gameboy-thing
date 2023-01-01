@@ -5,6 +5,12 @@ wCanDoVblank: db
 wTileLoop: db
 wTileSlot: db
 
+SECTION "Workram String copy buffer", wramx
+wVblankDoTransfer: db
+wVblankTransferBuffer: ds 7
+wVBlankTransferDest: ds 2
+wVblanktransfercount: db
+
 SECTION "Stack", WRAM0
 StackBottom: ds 49
 StackTop: ds 1
@@ -12,6 +18,11 @@ StackTop: ds 1
 DEF LCDC EQU $FF40
 DEF VRAM_TILE EQU $8000
 DEF INTERUPT_ENABLE EQU $FFFF
+; charmap shit
+CHARMAP "E", 1
+charmap "A", 2
+CHARMAP "B", 3
+CHARMAP "@", $FF
 
 SECTION "VBlank interupt", ROM0[$0040]
 	jp Do_VBlank
@@ -68,15 +79,7 @@ Dank:
 	; not set, keep waiting
 	jr nz, .waitloop
 	; if we are here, the LCD is DISABLED and we can now load some graphics into vram
-	xor a
-	ld [wTileSlot], a
-	ld hl, e_graphic
-	call loadtile
-	; load the a tile into slot 2 of vram
-	inc a
-	ld [wTileSlot], a
-	ld hl, a_graphic
-	call loadtile
+	call init_loadtiles
 	; set the first tile in the tilemap to 0
 	ld hl, $9800
 	xor a
@@ -85,8 +88,31 @@ Dank:
 	ld hl, LCDC
 	set 7, [hl]
 	; commit stop
+	ld hl, test
+	ld de, $9840
+	call prepare_buffer
 .dank
 	jr .dank
+
+
+init_loadtiles:
+	xor a
+	inc a
+	ld [wTileSlot], a
+	ld hl, e_graphic
+	call loadtile
+	; load the a tile into slot 2 of vram
+	inc a
+	ld [wTileSlot], a
+	ld hl, a_graphic
+	call loadtile
+	; load b tile (three)
+	inc a
+	ld [wTileSlot], a
+	ld hl, b_graphic
+	call loadtile
+	; return
+	ret
 
 
 SECTION "VBlank hanlder", ROMX 
@@ -101,6 +127,10 @@ Do_VBlank:
 	; else, disable the LCD and PPU
 	ld hl, LCDC
 	res 7, [hl]
+	; does it want us to do a transfer?
+	ld a, [wVblankDoTransfer]
+	cp 1
+	jp z, VBlank_Transfer
 	; clear tilemap
 	call clear_tilemap
 	; inform code that the LCD is turned off
@@ -116,6 +146,56 @@ Do_VBlank:
 	pop hl
 	pop af
 	reti
+
+VBlank_Transfer:
+	; backup de
+	push de
+	push bc
+	; load the var that holds destination into bc
+	ld bc, wVBlankTransferDest
+	; load high byte into a
+	ld a, [bc]
+	; put that into h
+	ld h, a
+	; to the same for low byte
+	inc bc
+	ld a, [bc]
+	ld l, a
+	; load the buffer contents into de
+	ld de, wVblankTransferBuffer
+	; reset the count
+	xor a
+	ld [wVblanktransfercount], a
+.loop
+	; load the count into a
+	ld a, [wVblanktransfercount]
+	; is it 7?
+	cp 7
+	jr z, .exit
+	; otherwise, inc the cound
+	inc a
+	ld [wVblanktransfercount], a
+	; load de into a
+	ld a, [de]
+	; store it into hl
+	ld [hl], a
+	; inc de
+	inc de
+	; add 16 to hl
+	inc hl
+	; loop
+	jr .loop  
+.exit
+	; reset the transfer flag
+	xor a
+	ld [wVblankDoTransfer], a
+	ld [wCanDoVblank], a
+	; load the LDCD into hl
+	ld hl, LCDC
+	set 7, [hl]
+	pop bc
+	pop de
+	jp Do_VBlank.end
 
 SECTION "Helpful routines", ROMX
 ; clear tilemap
@@ -247,7 +327,60 @@ loadtile:
 	pop de
 	ret
 
+; copy string from hl to vblank buffer
+; tell vblank where to store it from de
+prepare_buffer:
+	; backup a too
+	push af
+	; backup HL
+	push hl
+	; store high byte of destination address first
+	; but first, load the buffer into hl
+	ld hl, wVBlankTransferDest
+	ld a, d
+	ld [hl], a
+	; inc hl
+	inc hl
+	; store the low byte next
+	ld a, e
+	ld [hl], a
+	; restore hl's contents to de
+	pop de
+	; load the buffer address into hl
+	ld hl, wVblankTransferBuffer
+	; backup bc
+	push bc
+	; put 16 into bc
+	xor a
+	ld b, a
+	ld a, 1
+	ld c, a
+.loop
+	; check to see if the current value at de is @
+	ld a, [de]
+	cp "@"
+	; exit
+	jr z, .exit
+	; store the current char into hl
+	ld [hl], a
+	; add 16 to hl
+	add hl, bc
+	; inc de
+	inc de
+	jr .loop
+.exit
+	; set the flag
+	ld a, 1
+	ld [wVblankDoTransfer], a
+	ld [wCanDoVblank], a
+	pop bc
+	pop af
+	ret
+
+SECTION "Misc Data shit", ROMX
+test: db "BAE@"
 
 SECTION "Graphics", ROMX
 e_graphic: INCBIN "res/e.2bpp"
 a_graphic: INCBIN "res/a.2bpp"
+b_graphic: INCBIN "res/b.2bpp"
